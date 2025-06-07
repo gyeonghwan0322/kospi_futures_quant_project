@@ -13,6 +13,7 @@ import time
 # abstract_feature 모듈에서 Feature 클래스를 임포트합니다.
 from src.feature_engineering.abstract_feature import Feature
 from src.data_collection.api_client import APIClient
+from src.utils.api_config_manager import get_api_config
 
 logger = logging.getLogger(__name__)
 
@@ -83,75 +84,90 @@ class DomesticFuturesMinute(Feature):
         self.include_past_data = self.params.get("pw_data_incu_yn")
         self.include_fake_tick = self.params.get("fake_tick_incu_yn")
         self.start_time = self.params.get("start_time")
-        self.pagination_delay_sec = self.params.get("pagination_delay_sec")
+        self.pagination_delay_sec = self.params.get("pagination_delay_sec", 0.2)
+        self.max_days_per_request = self.params.get("max_days_per_request", 7)
 
-        # 파라미터 유효성 검증
-        valid_intervals = ["01", "03", "05", "10", "15", "30", "60"]
-        if self.interval_code not in valid_intervals:
+        # 파라미터 유효성 검증 (API 문서 기준)
+        valid_hour_cls_codes = ["30", "60", "3600"]  # 30초, 1분, 1시간
+        if self.hour_cls_code not in valid_hour_cls_codes:
             self.log_warning(
-                f"Invalid interval_code '{self.interval_code}'. Defaulting to '01'. Valid options: {valid_intervals}"
+                f"Invalid hour_cls_code '{self.hour_cls_code}'. Defaulting to '60'. Valid options: {valid_hour_cls_codes}"
             )
-            self.interval_code = "01"
+            self.hour_cls_code = "60"
+
+    def _get_additional_api_params(self) -> Dict[str, str]:
+        """분봉 조회를 위한 추가 API 파라미터 반환"""
+        return {
+            "FID_COND_MRKT_DIV_CODE": self.market_code,  # 시장 구분 코드
+            "FID_HOUR_CLS_CODE": self.hour_cls_code,  # 시간 구분 코드(30,60,3600 등)
+            "FID_PW_DATA_INCU_YN": self.include_past_data,  # 과거 데이터 포함 여부
+            "FID_FAKE_TICK_INCU_YN": self.include_fake_tick,  # 허봉 포함 여부
+            "FID_INPUT_HOUR_1": self.start_time,  # 조회 시작시간(HHMMSS)
+        }
 
     def _perform_inquiry(self, clock: str):
         """
-        설정된 시간에 맞추어 모든 대상 종목의 분봉 데이터를 조회하고 업데이트합니다.
+        설정된 시간에 맞추어 모든 대상 종목의 분봉 데이터를 조회합니다.
 
         Args:
             clock (str): 현재 시각 (HHMMSS).
         """
-        self.log_info(
-            f"Performing minute price inquiry for codes {self.code_list} at {clock} "
-            f"(interval: {self.interval_code} min, date: {self.start_date}, time: {self.start_time})."
+        self.log_warning(
+            f"📊 국내 선물 분봉 데이터 조회 시작 - 코드: {self.code_list}, 시간: {clock}"
         )
 
-        if not self.code_list:
-            self.log_warning("No codes specified for inquiry.")
-            return
+        api_config = get_api_config()
 
+        # 일반 데이터 조회
         for code in self.code_list:
             try:
-                params = {
-                    "FID_COND_MRKT_DIV_CODE": self.market_code,  # 시장 구분 코드
-                    "FID_INPUT_ISCD": code,  # 종목코드
-                    "FID_HOUR_CLS_CODE": self.hour_cls_code,  # 시간 구분 코드(30,60,3600 등)
-                    "FID_PW_DATA_INCU_YN": self.include_past_data,  # 과거 데이터 포함 여부
-                    "FID_FAKE_TICK_INCU_YN": self.include_fake_tick,  # 허봉 포함 여부
-                    "FID_INPUT_DATE_1": self.start_date,  # 조회 시작일(YYYYMMDD)
-                    "FID_INPUT_HOUR_1": self.start_time,  # 조회 시작시간(HHMMSS)
-                }
-
-                self.log_debug(
-                    f"Requesting minute price for {code} with params: {params}"
+                # API 설정에서 파라미터 자동 구성 (분봉은 단일 날짜 사용)
+                params = api_config.build_api_params(
+                    api_name="선물옵션분봉",
+                    symbol_code=code,
+                    start_date=self.start_date,
+                    end_date=None,  # 분봉은 단일 날짜
                 )
 
-                # 개선된 API 호출 메서드 사용
-                response = self.get_api(self.API_NAME, params)
+                # 종목 유형 확인
+                symbol_type = api_config.get_symbol_type(code)
+                self.log_info(f"📊 {code} 분봉 데이터 조회 시작 (유형: {symbol_type})")
 
-                parsed_data = self.parse_api_response(self.API_NAME, response)
+                # API 호출
+                response = self.get_api(
+                    self.API_NAME, params, tr_id=api_config.get_tr_id("선물옵션분봉")
+                )
 
-                if parsed_data is not None:
-                    # 내부 상태 저장
-                    self.minute_prices[code] = parsed_data
-                    # 스키마/테이블 기반 저장
+                # 응답 파싱
+                parsed_df = self.parse_api_response(self.API_NAME, response)
+
+                if parsed_df is not None and not parsed_df.empty:
+                    # 메모리에 저장
+                    self.minute_prices[code] = parsed_df
+
+                    # CSV 파일로 저장
                     self.save_data_with_schema(
-                        self.schema_name, code.lower(), parsed_data
+                        schema_name=getattr(
+                            self, "schema_name", "domestic_futures_minute"
+                        ),
+                        table_name=f"{self.feature_name}/{code}",
+                        data=parsed_df,
                     )
-                    self.log_info(
-                        f"Successfully updated {self.interval_code}-min price data for {code}. Total {len(parsed_data)} records."
+
+                    self.log_warning(
+                        f"✅ {code}: 분봉 데이터 수집 완료 - {len(parsed_df)}건 (유형: {symbol_type})"
                     )
                 else:
-                    self.log_warning(f"Parsed data is None for code {code}.")
+                    self.log_warning(f"⚠️ {code}: 수집된 데이터가 없습니다")
 
             except Exception as e:
-                import traceback
+                self.log_error(f"❌ {code} 조회 중 오류: {str(e)}")
+                continue
 
-                self.log_error(
-                    f"Error during inquiry for code {code}: {e}\n{traceback.format_exc()}"
-                )
-                self.health_check_value = f"Inquiry failed for {code} at {clock}"
-
-        self.health_check_value = f"Inquiry completed at {clock}"
+        self.log_warning(
+            f"📊 국내 선물 분봉 데이터 조회 완료 (총 {len(self.code_list)}개 종목)"
+        )
+        self.health_check_value = f"분봉 데이터 조회 완료 (시간: {clock})"
 
     def parse_api_response(
         self, api_name: str, response_data: Dict
@@ -258,74 +274,6 @@ class DomesticFuturesMinute(Feature):
             - 데이터가 없는 경우 None 반환.
         """
         if code:
-            if code in self.minute_prices:
-                return self.minute_prices[code].copy()
-            else:
-                # 스키마/테이블 방식으로 데이터 로드 시도
-                data = self.get_data_with_schema(self.schema_name, code.lower())
-                if data is not None:
-                    self.minute_prices[code] = data
-                    return data
-                self.log_warning(f"No data available for code {code}.")
-                return None
+            return self.minute_prices.get(code)
         else:
-            # 모든 코드의 데이터 반환
-            if not self.minute_prices:
-                # 저장소에서 모든 코드의 데이터 로드 시도
-                for c in self.code_list:
-                    data = self.get_data_with_schema(self.schema_name, c.lower())
-                    if data is not None:
-                        self.minute_prices[c] = data
-
-            return (
-                {k: v.copy() for k, v in self.minute_prices.items()}
-                if self.minute_prices
-                else None
-            )
-
-    # @staticmethod
-    # def resample_ohlc(df: pd.DataFrame, rule: str) -> Optional[pd.DataFrame]:
-    #     """
-    #     분봉 데이터를 더 긴 주기의 OHLC 데이터로 리샘플링하는 정적 메서드 예시.
-
-    #     Args:
-    #         df (pd.DataFrame): 분봉 데이터프레임 (DatetimeIndex 포함).
-    #         rule (str): 리샘플링 주기 (예: '15T', '1H', 'D'). Pandas resample rule string.
-
-    #     Returns:
-    #         Optional[pd.DataFrame]: 리샘플링된 OHLC 데이터프레임. 오류 시 None.
-    #     """
-    #     if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
-    #         logger.warning("Invalid DataFrame for resampling.")
-    #         return None
-    #     try:
-    #         # 리샘플링할 컬럼 확인 (API 응답 필드명 기준)
-    #         ohlc_dict = {
-    #             "futs_oprc": "first",  # 시가
-    #             "futs_hgpr": "max",  # 고가
-    #             "futs_lwpr": "min",  # 저가
-    #             "futs_prpr": "last",  # 종가
-    #             "cntg_vol": "sum",  # 거래량 합계
-    #         }
-    #         # 실제 DataFrame에 있는 컬럼만 사용
-    #         valid_cols = {k: v for k, v in ohlc_dict.items() if k in df.columns}
-    #         if not valid_cols:
-    #             logger.warning("No valid OHLC columns found for resampling.")
-    #             return None
-
-    #         resampled_df = df.resample(rule).agg(valid_cols)
-    #         # 컬럼 이름 변경 (선택 사항)
-    #         resampled_df = resampled_df.rename(
-    #             columns={
-    #                 "futs_oprc": "open",
-    #                 "futs_hgpr": "high",
-    #                 "futs_lwpr": "low",
-    #                 "futs_prpr": "close",
-    #                 "cntg_vol": "volume",
-    #             }
-    #         )
-    #         return resampled_df.dropna(subset=["open"])  # 시가 없는 행 제거
-
-    #     except Exception as e:
-    #         logger.error(f"Error resampling minute data (rule={rule}): {e}")
-    #         return None
+            return self.minute_prices if self.minute_prices else None

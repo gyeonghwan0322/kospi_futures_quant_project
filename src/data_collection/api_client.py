@@ -69,7 +69,10 @@ class APIClient:
 
         # 토큰 파일명 설정 (YYYYMMDD가 아니라 유효기간 기준으로 설정)
         # 한투 API 정책에 따라 토큰 유효기간은 1일이므로 날짜를 파일명에 사용
-        expiry_date = (datetime.today() + timedelta(days=1)).strftime("%Y%m%d")
+        token_validity_days = 1  # API 상수에서 가져올 수 있음
+        expiry_date = (datetime.today() + timedelta(days=token_validity_days)).strftime(
+            "%Y%m%d"
+        )
         APIClient._token_file_name = os.path.join(
             token_dir, f"KIS_TOKEN_{expiry_date}.yaml"
         )
@@ -659,8 +662,17 @@ class APIClient:
             logger.debug(
                 f"API endpoint not found for: {api_name}. Using fallback mapping."
             )
-            # 여기에 기존 api_path_mapping과 유사한 폴백 로직 구현 가능
-            api_path = "/uapi/domestic-stock/v1/quotations/inquire-price"  # 기본값
+            # 선물옵션 API를 위한 폴백 매핑 (구체적인 조건부터 체크)
+            if "선물옵션 분봉" in api_name:
+                api_path = "/uapi/domestic-futureoption/v1/quotations/inquire-time-fuopchartprice"
+            elif "선물옵션기간별시세" in api_name or "선물옵션" in api_name:
+                api_path = "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
+            elif "투자자시간대별매매동향" in api_name:
+                api_path = (
+                    "/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market"
+                )
+            else:
+                api_path = "/uapi/domestic-stock/v1/quotations/inquire-price"  # 기본값
 
         url = f"{self.base_url}{api_path}"
 

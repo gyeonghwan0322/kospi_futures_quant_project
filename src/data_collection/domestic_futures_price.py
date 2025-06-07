@@ -20,6 +20,7 @@ import time
 
 from src.feature_engineering.abstract_feature import Feature
 from src.data_collection.api_client import APIClient
+from src.utils.api_config_manager import get_api_config
 
 logger = logging.getLogger(__name__)
 
@@ -89,157 +90,81 @@ class DomesticFuturesPrice(Feature):
             "max_days_per_request", 90
         )  # 한 번에 조회할 최대 일수
 
-    def _split_date_range(
-        self, start_date: str, end_date: str, max_days: int = 90
-    ) -> List[tuple]:
+    def _get_additional_api_params(self) -> Dict[str, str]:
         """
-        날짜 범위를 API 제한(100건)에 맞게 분할합니다.
-
-        Args:
-            start_date (str): 시작 날짜 (YYYYMMDD)
-            end_date (str): 종료 날짜 (YYYYMMDD)
-            max_days (int): 한 번에 조회할 최대 일수
+        선물옵션 API에 필요한 추가 파라미터를 반환합니다
 
         Returns:
-            List[tuple]: (시작날짜, 종료날짜) 튜플 리스트
+            Dict[str, str]: 추가 파라미터
         """
-        try:
-            start_dt = datetime.strptime(start_date, "%Y%m%d")
-            end_dt = datetime.strptime(end_date, "%Y%m%d")
-
-            date_ranges = []
-            current_start = start_dt
-
-            while current_start <= end_dt:
-                current_end = min(current_start + timedelta(days=max_days - 1), end_dt)
-                date_ranges.append(
-                    (current_start.strftime("%Y%m%d"), current_end.strftime("%Y%m%d"))
-                )
-                current_start = current_end + timedelta(days=1)
-
-            return date_ranges
-        except Exception as e:
-            self.log_error(f"날짜 범위 분할 중 오류: {e}")
-            return [(start_date, end_date)]
+        return {
+            "FID_COND_MRKT_DIV_CODE": self.market_code,  # 시장 구분 (필수)
+            "FID_PERIOD_DIV_CODE": self.period_code,  # 기간 구분 (필수)
+        }
 
     def _perform_inquiry(self, clock: str):
         """
-        설정된 시간에 맞추어 지정된 종목 코드들의 시세 및 미결제약정 데이터를 조회하고 업데이트합니다.
-        100건 제한을 극복하기 위해 날짜 범위를 분할하여 연속조회를 수행합니다.
+        설정된 시간에 맞추어 지정된 종목 코드들의 시세 및 미결제약정 데이터를 조회합니다.
 
         Args:
             clock (str): 현재 시각 (HHMMSS).
         """
+        api_config = get_api_config()
+
         self.log_warning(
-            f"📈 국내 선물옵션 일별 가격 연속조회 시작 - 코드: {self.code_list}, 기간: {self.start_date}~{self.end_date}"
+            f"📈 국내 선물옵션 일별 가격 조회 시작 - 코드: {self.code_list}, 기간: {self.start_date}~{self.end_date}"
         )
 
-        # TR ID 정의
-        tr_id = "FHKIF03020100"
-
-        for index, code in enumerate(self.code_list):
+        # 일반 데이터 조회
+        for code in self.code_list:
             try:
-                # 날짜 범위를 분할하여 연속조회 준비
-                date_ranges = self._split_date_range(
-                    self.start_date, self.end_date, self.max_days_per_request
+                # API 설정에서 파라미터 자동 구성
+                params = api_config.build_api_params(
+                    api_name="선물옵션기간별시세",
+                    symbol_code=code,
+                    start_date=self.start_date,
+                    end_date=self.end_date,
                 )
 
-                # 종목별 전체 데이터를 수집할 리스트
-                all_data_frames = []
-                total_records = 0
+                # 종목 유형 확인
+                symbol_type = api_config.get_symbol_type(code)
+                self.log_info(f"📊 {code} 데이터 조회 시작 (유형: {symbol_type})")
 
-                self.log_warning(
-                    f"📊 {code}: {len(date_ranges)}개 구간으로 분할하여 조회 시작"
+                # API 호출
+                response = self.get_api(
+                    self.API_NAME,
+                    params,
+                    tr_id=api_config.get_tr_id("선물옵션기간별시세"),
                 )
 
-                for range_idx, (range_start, range_end) in enumerate(date_ranges):
-                    try:
-                        # API 파라미터 설정
-                        params = {
-                            "FID_COND_MRKT_DIV_CODE": self.market_code,  # 시장 구분 (필수)
-                            "FID_INPUT_ISCD": code,  # 종목코드 (필수)
-                            "FID_PERIOD_DIV_CODE": self.period_code,  # 기간 구분 (필수)
-                            "FID_INPUT_DATE_1": range_start,  # 조회 시작일 (필수)
-                            "FID_INPUT_DATE_2": range_end,  # 조회 종료일 (필수)
-                        }
+                # 응답 파싱
+                parsed_df = self.parse_api_response(self.API_NAME, response)
 
-                        self.log_debug(
-                            f"{code} [{range_idx+1}/{len(date_ranges)}구간]: {range_start}~{range_end} 조회"
-                        )
+                if parsed_df is not None and not parsed_df.empty:
+                    # 메모리에 저장
+                    self.futures_data[code] = parsed_df
 
-                        # API 호출
-                        response = self.get_api(self.API_NAME, params, tr_id=tr_id)
-
-                        # 응답 파싱
-                        parsed_df = self.parse_api_response(self.API_NAME, response)
-
-                        if parsed_df is not None and not parsed_df.empty:
-                            all_data_frames.append(parsed_df)
-                            total_records += len(parsed_df)
-                            self.log_debug(
-                                f"{code}: {range_idx+1}구간 완료 ({len(parsed_df)}건, 누적: {total_records}건)"
-                            )
-                        else:
-                            self.log_debug(f"{code}: {range_idx+1}구간 데이터 없음")
-
-                        # 구간 간 지연
-                        if (
-                            range_idx < len(date_ranges) - 1
-                            and self.pagination_delay_sec
-                        ):
-                            time.sleep(self.pagination_delay_sec)
-
-                    except Exception as range_e:
-                        self.log_error(
-                            f"{code} {range_idx+1}구간 ({range_start}~{range_end}) 조회 중 오류: {range_e}"
-                        )
-                        continue
-
-                # 모든 구간 데이터를 하나로 합치기
-                if all_data_frames:
-                    combined_data = pd.concat(all_data_frames, ignore_index=True)
-
-                    # 중복 제거 및 날짜순 정렬
-                    if "stck_bsop_date" in combined_data.columns:
-                        combined_data = combined_data.drop_duplicates(
-                            subset=["stck_bsop_date"]
-                        )
-                        combined_data = combined_data.sort_values("stck_bsop_date")
-
-                    # 데이터 저장
-                    self.futures_data[code] = combined_data
+                    # CSV 파일로 저장
                     self.save_data_with_schema(
-                        self.schema_name, code.lower(), combined_data
+                        schema_name=getattr(self, "schema_name", "domestic_futures"),
+                        table_name=f"{self.feature_name}/{code}",
+                        data=parsed_df,
                     )
 
-                    # 데이터 범위 확인
-                    start_date_str = combined_data["stck_bsop_date"].min()
-                    end_date_str = combined_data["stck_bsop_date"].max()
-
                     self.log_warning(
-                        f"✅ {code}: 일별 가격 연속조회 완료 - {total_records}건 수집 "
-                        f"({start_date_str} ~ {end_date_str})"
+                        f"✅ {code}: 데이터 수집 완료 - {len(parsed_df)}건 (유형: {symbol_type})"
                     )
                 else:
                     self.log_warning(f"⚠️ {code}: 수집된 데이터가 없습니다")
 
-                # 다음 종목 처리 전 지연
-                if index < len(self.code_list) - 1 and self.pagination_delay_sec:
-                    time.sleep(self.pagination_delay_sec)
-
             except Exception as e:
-                self.log_error(f"❌ {code} 연속조회 중 오류: {str(e)}")
-                import traceback
-
-                self.log_error(traceback.format_exc())
+                self.log_error(f"❌ {code} 조회 중 오류: {str(e)}")
                 continue
 
         self.log_warning(
-            f"📈 국내 선물옵션 일별 가격 연속조회 완료 (총 {len(self.code_list)}개 종목)"
+            f"📈 국내 선물옵션 일별 가격 조회 완료 (총 {len(self.code_list)}개 종목)"
         )
-        self.health_check_value = (
-            f"국내 선물옵션 일별 가격 연속조회 완료 (시간: {clock})"
-        )
+        self.health_check_value = f"국내 선물옵션 일별 가격 조회 완료 (시간: {clock})"
 
     def parse_api_response(
         self, api_name: str, response_data: Dict

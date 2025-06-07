@@ -222,14 +222,7 @@ def get_csv_filename(feature_name: str, code: str) -> str:
     Returns:
         CSV 파일명
     """
-    # 콜옵션 특별 처리
-    if "call_investor" in feature_name and code == "options":
-        return "calloptions.csv"
-    # 풋옵션 특별 처리
-    elif "put_investor" in feature_name and code == "putoptions":
-        return "putoptions.csv"
-    else:
-        return f"{code}.csv"
+    return f"{code}.csv"
 
 
 def save_feature_to_csv(
@@ -292,6 +285,27 @@ def save_feature_to_csv(
                 csv_filename = get_csv_filename(feature_name, code)
                 csv_path = os.path.join(feature_dir, csv_filename)
 
+                # 기존 파일이 있으면 읽어와서 합치기 (중복 제거)
+                if os.path.exists(csv_path):
+                    existing_df = pd.read_csv(csv_path)
+                    df = pd.concat([existing_df, df], ignore_index=True)
+
+                    # 중복 제거: 날짜 기준으로 중복 제거 (최신 데이터 유지)
+                    if "stck_bsop_date" in df.columns:
+                        df = df.drop_duplicates(
+                            subset=["stck_bsop_date", "code"], keep="last"
+                        )
+                    elif "trade_date" in df.columns:
+                        df = df.drop_duplicates(
+                            subset=["trade_date", "code"], keep="last"
+                        )
+
+                    # 날짜순 정렬
+                    if "stck_bsop_date" in df.columns:
+                        df = df.sort_values(["stck_bsop_date"], ascending=True)
+                    elif "trade_date" in df.columns:
+                        df = df.sort_values(["trade_date"], ascending=True)
+
                 # CSV 저장
                 df.to_csv(csv_path, index=False, encoding="utf-8-sig")
                 saved_files.append(csv_filename)
@@ -310,6 +324,27 @@ def save_feature_to_csv(
 
                 csv_filename = f"{feature_name}.csv"
                 csv_path = os.path.join(feature_dir, csv_filename)
+
+                # 기존 파일이 있으면 읽어와서 합치기 (중복 제거)
+                if os.path.exists(csv_path):
+                    existing_df = pd.read_csv(csv_path)
+                    data = pd.concat([existing_df, data], ignore_index=True)
+
+                    # 중복 제거: 날짜 기준으로 중복 제거 (최신 데이터 유지)
+                    if "stck_bsop_date" in data.columns:
+                        data = data.drop_duplicates(
+                            subset=["stck_bsop_date"], keep="last"
+                        )
+                    elif "trade_date" in data.columns:
+                        data = data.drop_duplicates(subset=["trade_date"], keep="last")
+
+                    # 날짜순 정렬
+                    if "stck_bsop_date" in data.columns:
+                        data = data.sort_values(["stck_bsop_date"], ascending=True)
+                    elif "trade_date" in data.columns:
+                        data = data.sort_values(["trade_date"], ascending=True)
+
+                # CSV 저장
                 data.to_csv(csv_path, index=False, encoding="utf-8-sig")
                 saved_files.append(csv_filename)
 
@@ -486,7 +521,7 @@ def collect_and_save_data(
                             f"🔍 {feature_name}: {len(data)}행 데이터 확인됨"
                         )
                 else:
-                    # CSV 저장
+                    # CSV 저장 (증분 업데이트 지원)
                     if save_feature_to_csv(
                         feature_name, data, start_date, end_date, output_dir
                     ):
@@ -511,9 +546,6 @@ def collect_and_save_data(
 
     except Exception as e:
         logger.error(f"❌ 데이터 수집 중 최상위 오류 발생: {str(e)}", exc_info=True)
-
-
-# DB 관련 함수들이 제거되었습니다. 이제 CSV 저장만 사용합니다.
 
 
 def main():

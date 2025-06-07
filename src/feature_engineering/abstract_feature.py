@@ -3,7 +3,6 @@
 피처 추상 클래스 모듈
 
 모든 피처 클래스가 상속해야 하는 기본 추상 클래스를 정의합니다.
-hantu_api_docs/response_api.json에 정의된 API를 쉽게 사용할 수 있도록
 표준 인터페이스와 유틸리티 함수를 제공합니다.
 """
 
@@ -15,6 +14,7 @@ import os
 from datetime import datetime, timedelta
 import pandas as pd
 import functools
+from src.utils.api_config_manager import get_api_config
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +175,16 @@ class Feature(metaclass=ABCMeta):
         하드코딩된 값은 최소화하고 가능한 모든 설정을 params.yaml에서 가져와 사용합니다.
         """
         pass
+
+    def _get_api_schema(self):
+        """
+        API 스키마 객체를 반환합니다.
+        APIClient에서 API 정보를 조회하기 위해 사용됩니다.
+
+        Returns:
+            APIClient: API 클라이언트 객체
+        """
+        return self.feature_query  # APIClient 객체 반환
 
     def get_api_by_name(self, api_name: str) -> Dict:
         """
@@ -793,3 +803,25 @@ class Feature(metaclass=ABCMeta):
         return self.perform_api_request(
             method="POST", api_name=api_name, tr_id=tr_id, body=body, url_path=url_path
         )
+
+    def get_tr_id(self, api_name: str) -> str:
+        """
+        API 이름에 해당하는 TR ID를 반환합니다
+
+        Args:
+            api_name (str): API 이름
+
+        Returns:
+            str: TR ID
+        """
+        # YAML 설정에서 TR ID 조회
+        api_config = get_api_config()
+        tr_id = api_config.get_tr_id(api_name)
+
+        if tr_id == "FHKIF03020100" and api_name not in api_config.config.get(
+            "tr_ids", {}
+        ):
+            # 설정에 없으면 경고 로그
+            self.log_warning(f"TR ID not found for API: {api_name}, using default")
+
+        return tr_id

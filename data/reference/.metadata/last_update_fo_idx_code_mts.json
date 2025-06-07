@@ -1,0 +1,19 @@
+{
+  "feature_name": "reference",
+  "code": "fo_idx_code_mts",
+  "last_update_date": "20250607",
+  "last_update_time": "004820",
+  "last_update_timestamp": "2025-06-07T00:48:20.512072",
+  "total_records": 2900,
+  "date_range": {
+    "start": null,
+    "end": null
+  },
+  "data_hash": "21bddc442dd4c895fe9d8d10f53e2ffa76bf033d5968a0e24ff4dab6293faad9",
+  "api_version": "v1",
+  "collection_mode": "full",
+  "last_error": null,
+  "retry_count": 0,
+  "csv_path": "C:\\Users\\rkddk\\Desktop\\Portfolio\\kospi_futures_quant_project\\data\\reference\\fo_idx_code_mts.csv",
+  "metadata_version": "1.0"
+}

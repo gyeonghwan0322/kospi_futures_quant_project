@@ -1,0 +1,19 @@
+{
+  "feature_name": "reference",
+  "code": "fo_com_code",
+  "last_update_date": "20250607",
+  "last_update_time": "004820",
+  "last_update_timestamp": "2025-06-07T00:48:20.502070",
+  "total_records": 122,
+  "date_range": {
+    "start": null,
+    "end": null
+  },
+  "data_hash": "abc7819d17f2ba3af36f5679b8c673cea91ad73e5c8af4add2d92ff8af1b3a27",
+  "api_version": "v1",
+  "collection_mode": "full",
+  "last_error": null,
+  "retry_count": 0,
+  "csv_path": "C:\\Users\\rkddk\\Desktop\\Portfolio\\kospi_futures_quant_project\\data\\reference\\fo_com_code.csv",
+  "metadata_version": "1.0"
+}

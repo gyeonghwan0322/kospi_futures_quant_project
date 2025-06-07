@@ -71,6 +71,15 @@ class InvestorTrends(Feature):
         # 날짜 관련 설정은 상위 클래스(Feature)에서 처리됨
         # self.start_date와 self.end_date는 이미 _initialize()에서 설정됨
 
+    def _get_additional_api_params(self) -> Dict[str, str]:
+        """
+        투자자 매매동향 API에 필요한 추가 파라미터를 반환합니다
+
+        Returns:
+            Dict[str, str]: 추가 파라미터 (현재는 빈 딕셔너리)
+        """
+        return {}
+
     def _perform_inquiry(self, clock: str):
         """
         정해진 시간에 투자자 매매 동향 데이터를 조회합니다.
@@ -100,6 +109,7 @@ class InvestorTrends(Feature):
                     "kosdaq",
                     "kospi200",
                     "options",
+                    "calloptions",  # 콜옵션 추가
                     "putoptions",
                 ]:
                     self.log_warning(f"지원되지 않는 시장 코드: {market}")
@@ -126,6 +136,9 @@ class InvestorTrends(Feature):
                     market_div_code = "K2I"  # 선물
                     input_code_2 = "F001"  # 선물
                 elif market == "options":
+                    market_div_code = "K2I"  # 선물
+                    input_code_2 = "OC01"  # 콜옵션
+                elif market == "calloptions":
                     market_div_code = "K2I"  # 선물
                     input_code_2 = "OC01"  # 콜옵션
                 elif market == "putoptions":
