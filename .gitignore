@@ -159,8 +159,71 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# ============================================================================
+# PROJECT SPECIFIC - KOSPI Futures Quantitative Trading System
+# ============================================================================
+
+# Configuration files (contains sensitive API keys and parameters)
 config/params.yaml
 config/features.yaml
 config/db_config.yaml
 config/api_config.yaml
+
+# API Tokens and Authentication
+tokens/
+*.token
+*.key
+auth.json
+credentials.json
+
+# Documentation (auto-generated or draft docs)
+docs/
+*.md.bak
+*.rst.bak
+
+# Data directories (contains large datasets and sensitive market data)
+data/temp/
+data/cache/
+data/backup/
+*.parquet
+*.feather
+
+# Log files (can contain sensitive information)
+logs/
+*.log.*
+*.out
+*.err
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary and cache files
+.tmp/
+.cache/
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE and Editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# Trading specific
+backtest_results/
+portfolio_data/
+trade_history/
+performance_reports/
+
+# Secrets and environment variables
+.env.local
+.env.production
+.env.staging
+api_keys.txt
+secrets.yaml
 
