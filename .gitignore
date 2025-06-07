@@ -176,6 +176,10 @@ tokens/
 auth.json
 credentials.json
 
+# Project configuration files
+pyproject.toml
+*.toml
+
 # Documentation (auto-generated or draft docs)
 docs/
 *.md.bak
@@ -226,4 +230,8 @@ performance_reports/
 .env.staging
 api_keys.txt
 secrets.yaml
+
+# Git configuration files (hide from repository view)
+.gitattributes
+.gitignore
 
