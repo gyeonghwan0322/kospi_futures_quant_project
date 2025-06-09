@@ -13,9 +13,10 @@ import os
 import yaml
 import logging
 import importlib
+import traceback
 from typing import Dict, List, Any, Optional, Union, Type
 
-from src.feature_engineering.abstract_feature import Feature
+from src.data_collection.abstract_feature import Feature
 from src.data_collection.api_client import APIClient
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,6 @@ class FeatureManager:
         features_yaml_path: str = "config/features.yaml",
         params_yaml_path: str = "config/params.yaml",
         api_config_yaml_path: str = "config/api_config.yaml",
-        api_schema_file_path: str = None,
     ):
         """FeatureManager 생성자
 
@@ -41,27 +41,18 @@ class FeatureManager:
             features_yaml_path: 피처 설정 파일 경로
             params_yaml_path: 파라미터 설정 파일 경로
             api_config_yaml_path: API 설정 파일 경로
-            api_schema_file_path: API 스키마 파일 경로
         """
         self.features_yaml_path = features_yaml_path
         self.params_yaml_path = params_yaml_path
         self.api_config_yaml_path = api_config_yaml_path
-        self.api_schema_file_path = api_schema_file_path
 
         # 설정 파일 로드
         self.features_config = self._load_yaml(features_yaml_path)
         self.params_config = self._load_yaml(params_yaml_path)
         self.api_config = self._load_yaml(api_config_yaml_path)
 
-        # 원래 방식으로 다시 변경합니다
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-        self.api_client = APIClient(
-            api_config=self.api_config,
-            schema_file_path=os.path.join(
-                project_root, "hantu_api_docs", "response_api.json"
-            ),
-        )
+        # APIClient 생성 (스키마 파일 사용하지 않음)
+        self.api_client = APIClient(api_config=self.api_config)
 
         # 피처 인스턴스 저장 딕셔너리
         self.features: Dict[str, Feature] = {}
@@ -133,16 +124,18 @@ class FeatureManager:
                 if not code_list and "code_list" in params:
                     code_list = params.get("code_list", [])
 
-                    # API 설정 추가
+                # API 설정 추가
                 if "api_config" not in params:
                     params["api_config"] = self.api_config
 
-                # 피처 인스턴스 생성 (기본 파라미터만 전달)
+                quote_connect = feature_config.get("quote_connect", False)
+
+                # 피처 인스턴스 생성
                 feature_instance = feature_class(
                     _feature_name=feature_name,
                     _code_list=code_list,
-                    _feature_query=self.api_client,
-                    _quote_connect=False,
+                    _feature_query=self.api_client,  # APIClient 인스턴스 전달
+                    _quote_connect=quote_connect,
                     _params=params,
                 )
 
@@ -152,8 +145,6 @@ class FeatureManager:
 
             except Exception as e:
                 logger.error(f"피처 초기화 중 오류 발생: {feature_name}, {str(e)}")
-                import traceback
-
                 logger.error(traceback.format_exc())
 
     def _import_feature_class(self, class_path: str) -> Optional[Type[Feature]]:
@@ -223,65 +214,8 @@ class FeatureManager:
             return result
         except Exception as e:
             logger.error(f"피처 호출 중 오류 발생: {feature_name}, {str(e)}")
-            import traceback
-
             logger.error(traceback.format_exc())
             return None
-
-    def perform_inquiry(self, feature_name: str, time_now: str = None) -> bool:
-        """피처 조회 수행 메서드
-
-        Args:
-            feature_name: 피처 이름
-            time_now: 현재 시각 (HHmmss 형식)
-
-        Returns:
-            bool: 조회 성공 여부
-        """
-        feature = self.get_feature(feature_name)
-        if not feature:
-            logger.error(f"피처를 찾을 수 없습니다: {feature_name}")
-            return False
-
-        try:
-            # 피처 객체의 _perform_inquiry 메서드 호출
-            success = feature._perform_inquiry(time_now)
-            return success
-        except Exception as e:
-            logger.error(f"피처 조회 중 오류 발생: {feature_name}, {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return False
-
-    def on_clock(self, time_str: str) -> Dict[str, Any]:
-        """시계 이벤트 처리
-
-        지정된 시간에 조회가 필요한 모든 피처의 on_clock 메서드를 호출합니다.
-
-        Args:
-            time_str: 현재 시간 (HHMMSS 형식)
-
-        Returns:
-            처리 결과 (피처별)
-        """
-        results = {}
-
-        for feature_name, feature in self.features.items():
-            if feature.inquiry and time_str in feature.inquiry_time_list:
-                try:
-                    logger.info(
-                        f"Triggering inquiry for feature '{feature_name}' at time {time_str}"
-                    )
-                    result = feature.on_clock({"time": time_str})
-                    results[feature_name] = result
-                except Exception as e:
-                    logger.error(
-                        f"Error invoking on_clock for feature '{feature_name}': {str(e)}"
-                    )
-                    results[feature_name] = {"error": str(e)}
-
-        return results
 
     def check_health(self) -> Dict[str, str]:
         """피처 상태 확인

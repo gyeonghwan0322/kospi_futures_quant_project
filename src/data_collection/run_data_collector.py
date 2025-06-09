@@ -406,80 +406,33 @@ def collect_and_save_data(
 
         features_to_get_data_from: Dict[str, Any] = {}
 
-        if scheduled_only:
-            logger.info(f"스케줄된 피처 처리 시작: 시간 {time_str}")
-            all_managed_features = feature_manager.get_all_features()
-            triggered_feature_names = []
-            for name, feature_obj in all_managed_features.items():
-                # Feature 클래스의 inquiry 및 inquiry_time_list 속성 직접 사용
-                if feature_obj.inquiry and time_str in feature_obj.inquiry_time_list:
-                    try:
-                        logger.info(f"'{name}' 피처에 대해 스케줄된 inquiry 실행 중...")
-                        feature_obj.run(
-                            clock=time_str
-                        )  # .run()이 _perform_inquiry 호출
-                        features_to_get_data_from[name] = feature_obj
-                        triggered_feature_names.append(name)
-                    except Exception as e:
-                        logger.error(
-                            f"'{name}' 피처의 스케줄된 inquiry 실행 중 오류: {e}",
-                            exc_info=True,
-                        )
-            if triggered_feature_names:
-                logger.info(
-                    f"스케줄된 inquiry 실행 완료 피처: {', '.join(triggered_feature_names)}"
-                )
-            else:
-                logger.info(f"{time_str}에 스케줄된 inquiry를 실행할 피처가 없습니다.")
+        # 피처 선택
+        candidate_features: Dict[str, Any] = {}
+        if features:
+            logger.warning(f"🎯 지정된 피처들 처리: {features}")
+            for feature_name_req in features:
+                feature_obj = feature_manager.get_feature(feature_name_req)
+                if feature_obj:
+                    candidate_features[feature_name_req] = feature_obj
+                else:
+                    logger.warning(f"⚠️ 피처를 찾을 수 없습니다: {feature_name_req}")
         else:
-            # Not scheduled_only: Run specified or all features on-demand
-            candidate_features_for_on_demand: Dict[str, Any] = {}
-            if features:
-                logger.info(
-                    f"지정된 피처들에 대해 on-demand inquiry 처리 시작: {features}"
-                )
-                for feature_name_req in features:
-                    feature_obj = feature_manager.get_feature(feature_name_req)
-                    if feature_obj:
-                        candidate_features_for_on_demand[feature_name_req] = feature_obj
-                    else:
-                        logger.warning(
-                            f"FeatureManager에서 '{feature_name_req}' 피처를 찾을 수 없습니다."
-                        )
-            else:
-                logger.info("모든 피처에 대해 on-demand inquiry 처리 시작")
-                candidate_features_for_on_demand = feature_manager.get_all_features()
+            logger.warning("🔄 모든 피처 처리")
+            candidate_features = feature_manager.get_all_features()
 
-            if not candidate_features_for_on_demand:
-                logger.info("On-demand inquiry를 실행할 피처가 없습니다.")
-            else:
-                for name, feature_obj in candidate_features_for_on_demand.items():
-                    try:
-                        # On-demand 실행 시, 피처의 inquiry 플래그가 True인 경우 _perform_inquiry 직접 호출
-                        if feature_obj.inquiry:
-                            if hasattr(feature_obj, "_perform_inquiry") and callable(
-                                feature_obj._perform_inquiry
-                            ):
-                                logger.info(
-                                    f"'{name}' 피처에 대해 on-demand _perform_inquiry 실행 중 (시간: {time_str})..."
-                                )
-                                feature_obj._perform_inquiry(clock=time_str)
-                                features_to_get_data_from[name] = (
-                                    feature_obj  # 데이터 가져올 피처 목록에 추가
-                                )
-                            else:
-                                logger.warning(
-                                    f"'{name}' 피처는 inquiry가 활성화되어 있지만 _perform_inquiry 메서드가 없습니다."
-                                )
-                        else:
-                            logger.info(
-                                f"'{name}' 피처는 inquiry가 비활성화되어 있어 on-demand inquiry를 건너뜁니다."
-                            )
-                    except Exception as e:
-                        logger.error(
-                            f"'{name}' 피처의 on-demand _perform_inquiry 실행 중 오류: {e}",
-                            exc_info=True,
-                        )
+        # 데이터 수집 실행
+        for name, feature_obj in candidate_features.items():
+            try:
+                logger.warning(f"📈 {name}: 데이터 수집 시작")
+                if hasattr(feature_obj, "collect_data"):
+                    feature_obj.collect_data()
+                    features_to_get_data_from[name] = feature_obj
+                    logger.warning(f"✅ {name}: 데이터 수집 완료")
+                else:
+                    logger.warning(f"⚠️ {name}: collect_data 메서드가 없습니다")
+            except Exception as e:
+                logger.error(f"❌ {name}: 데이터 수집 중 오류 - {e}")
+                continue
 
         logger.warning(
             f"📊 총 {len(features_to_get_data_from)}개의 피처에 대해 데이터 수집 및 저장을 시도합니다."

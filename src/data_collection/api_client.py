@@ -69,10 +69,7 @@ class APIClient:
 
         # 토큰 파일명 설정 (YYYYMMDD가 아니라 유효기간 기준으로 설정)
         # 한투 API 정책에 따라 토큰 유효기간은 1일이므로 날짜를 파일명에 사용
-        token_validity_days = 1  # API 상수에서 가져올 수 있음
-        expiry_date = (datetime.today() + timedelta(days=token_validity_days)).strftime(
-            "%Y%m%d"
-        )
+        expiry_date = (datetime.today() + timedelta(days=1)).strftime("%Y%m%d")
         APIClient._token_file_name = os.path.join(
             token_dir, f"KIS_TOKEN_{expiry_date}.yaml"
         )
@@ -97,14 +94,8 @@ class APIClient:
                     f.write("# KIS API Token File\n")
                     yaml.dump({"created_at": datetime.now()}, f)
 
-        # API 스키마 파일 경로 설정
-        if schema_file_path is None:
-            schema_file_path = os.path.join(
-                project_root, "hantu_api_docs", "response_api.json"
-            )
-
-        # API 스키마 로드
-        self.api_schema = self._load_api_schema(schema_file_path)
+        # API 스키마는 더 이상 사용하지 않음 (api_config.yaml 사용)
+        self.api_schema = {}
 
         # 초기 인증
         if not self.app_key or not self.app_secret:
@@ -220,132 +211,6 @@ class APIClient:
         except Exception as e:
             logger.error(f"Error reading token from file: {e}")
             return None
-
-    def _load_api_schema(self, schema_file_path: str) -> Dict[str, Any]:
-        """API 스키마 파일 로드"""
-        try:
-            if not os.path.exists(schema_file_path):
-                # API 스키마 파일이 없어도 fallback mapping으로 동작하므로 debug 레벨로 변경
-                logger.debug(f"API 스키마 파일이 존재하지 않습니다: {schema_file_path}")
-                return {}
-
-            with open(schema_file_path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
-                logger.info(f"API 스키마 파일 로드 성공: {schema_file_path}")
-                return schema
-        except Exception as e:
-            logger.error(f"스키마 파일 로드 실패: {e}")
-            return {}
-
-    def get_api_by_name(self, api_name: str) -> Optional[Dict[str, Any]]:
-        """API 이름으로 API 정보 검색"""
-        if not self.api_schema or "data_products" not in self.api_schema:
-            return None
-
-        for product in self.api_schema.get("data_products", []):
-            for api in product.get("api_references", []):
-                if api.get("api_name") == api_name:
-                    return api
-        return None
-
-    def get_api_endpoint(self, api_name: str) -> Optional[Dict[str, Any]]:
-        """API 이름으로 엔드포인트 정보 검색"""
-        api_info = self.get_api_by_name(api_name)
-        if api_info and "endpoint" in api_info:
-            return api_info.get("endpoint")
-        return None
-
-    def get_request_params(self, api_name: str) -> Tuple[List[Dict], List[Dict]]:
-        """API 이름으로 요청 파라미터 정보 검색
-
-        Args:
-            api_name: API 이름
-
-        Returns:
-            tuple: (header_params, query_params) 튜플
-        """
-        api_info = self.get_api_by_name(api_name)
-        if not api_info or "request" not in api_info:
-            return [], []
-
-        request = api_info.get("request", {})
-        header_params = request.get("header_params", [])
-        query_params = request.get("query_params", [])
-        return header_params, query_params
-
-    def get_param_info(self, api_name: str, param_name: str) -> Optional[Dict]:
-        """API 이름과 파라미터 이름으로 파라미터 정보 조회
-
-        Args:
-            api_name: API 이름
-            param_name: 파라미터 이름
-
-        Returns:
-            Optional[Dict]: 파라미터 정보 딕셔너리 또는 None
-        """
-        header_params, query_params = self.get_request_params(api_name)
-
-        # 헤더 파라미터 검색
-        for param in header_params:
-            if param.get("param_name", "").upper() == param_name.upper():
-                return param
-
-        # 쿼리 파라미터 검색
-        for param in query_params:
-            if param.get("param_name", "").upper() == param_name.upper():
-                return param
-
-        return None
-
-    def get_field_info(self, api_name: str, field_name: str) -> Optional[Dict]:
-        """API 이름과 응답 필드 이름으로 필드 정보 조회
-
-        Args:
-            api_name: API 이름
-            field_name: 필드 이름
-
-        Returns:
-            Optional[Dict]: 필드 정보 딕셔너리 또는 None
-        """
-        api_info = self.get_api_by_name(api_name)
-        if not api_info or "response" not in api_info:
-            return None
-
-        response = api_info.get("response", {})
-
-        # output1_fields 검색
-        for field in response.get("output1_fields", []):
-            if field.get("field_name", "").upper() == field_name.upper():
-                return field
-
-        # output2_fields 검색
-        for field in response.get("output2_fields", []):
-            if field.get("field_name", "").upper() == field_name.upper():
-                return field
-
-        # fields 검색
-        for field in response.get("fields", []):
-            if field.get("field_name", "").upper() == field_name.upper():
-                return field
-
-        return None
-
-    def get_all_api_names(self) -> List[str]:
-        """모든 API 이름 목록 조회
-
-        Returns:
-            List[str]: API 이름 목록
-        """
-        api_names = []
-        if not self.api_schema or "data_products" not in self.api_schema:
-            return api_names
-
-        for product in self.api_schema.get("data_products", []):
-            for api in product.get("api_references", []):
-                if "api_name" in api:
-                    api_names.append(api["api_name"])
-
-        return api_names
 
     def _auth(self) -> bool:
         """인증 토큰 발급 (한투 API 정책 준수)
@@ -616,7 +481,7 @@ class APIClient:
 
         Args:
             method (str): HTTP 메소드 ("GET" 또는 "POST").
-            api_name (str): API 이름 (response_api.json에 정의된 이름).
+            api_name (str): API 이름.
             tr_id (str): 거래 ID.
             params (Optional[Dict]): GET 요청 시 URL 파라미터.
             body (Optional[Dict]): POST 요청 시 body 데이터.
@@ -653,37 +518,57 @@ class APIClient:
                 "_debug_info": "API Secret is missing or empty",
             }
 
-        # API 엔드포인트 정보 가져오기
-        api_endpoint = self.get_api_endpoint(api_name)
-        if api_endpoint and "url_path" in api_endpoint:
-            api_path = api_endpoint["url_path"]
+        # API 엔드포인트 정보 가져오기 - api_endpoints에서 찾기
+        api_endpoints = self.api_config.get("api_endpoints", {})
+        api_path = None
+        effective_tr_id = tr_id
+
+        if api_name in api_endpoints:
+            api_info = api_endpoints[api_name]
+            api_path = api_info.get("path")
+            logger.info(f"Found API path in api_endpoints: {api_path}")
+
+            # tr_id가 없으면 api_endpoints에서 가져오기
+            if not effective_tr_id:
+                effective_tr_id = api_info.get("tr_id", "")
+                if effective_tr_id:
+                    logger.info(f"Using TR_ID from api_endpoints: {effective_tr_id}")
         else:
-            # API endpoint가 없어도 fallback mapping으로 동작하므로 debug 레벨로 변경
-            logger.debug(
-                f"API endpoint not found for: {api_name}. Using fallback mapping."
-            )
-            # 선물옵션 API를 위한 폴백 매핑 (구체적인 조건부터 체크)
-            if "선물옵션 분봉" in api_name:
-                api_path = "/uapi/domestic-futureoption/v1/quotations/inquire-time-fuopchartprice"
-            elif "선물옵션기간별시세" in api_name or "선물옵션" in api_name:
-                api_path = "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
-            elif "투자자시간대별매매동향" in api_name:
-                api_path = (
-                    "/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market"
-                )
-            else:
-                api_path = "/uapi/domestic-stock/v1/quotations/inquire-price"  # 기본값
+            # 폴백 매핑 - api_config.yaml의 api_paths에서 찾기 (legacy)
+            api_paths = self.api_config.get("api_paths", {})
+            if api_name in api_paths:
+                api_path = api_paths[api_name]
+                logger.info(f"Found API path in legacy config: {api_path}")
+
+            # legacy tr_ids에서 찾기
+            if not effective_tr_id:
+                tr_ids = self.api_config.get("tr_ids", {})
+                if api_name in tr_ids:
+                    effective_tr_id = tr_ids[api_name]
+                    logger.info(f"Found TR_ID in legacy config: {effective_tr_id}")
+
+        if not api_path:
+            logger.error(f"API endpoint not found for: {api_name}")
+            return {
+                "rt_cd": "99",
+                "msg1": f"API endpoint not found for: {api_name}",
+                "error": "API_NOT_CONFIGURED",
+                "_debug_info": f"API '{api_name}' is not configured in api_config.yaml",
+            }
 
         url = f"{self.base_url}{api_path}"
 
-        # tr_id가 없으면 API 엔드포인트에서 가져오기
-        effective_tr_id = tr_id
-        if not effective_tr_id and api_endpoint:
-            effective_tr_id = api_endpoint.get("production_tr_id", "")
-            if effective_tr_id:
-                logger.info(f"Using TR_ID from schema: {effective_tr_id}")
+        # TR_ID가 여전히 없으면 오류 반환
+        if not effective_tr_id:
+            logger.error(f"TR_ID not found for API: {api_name}")
+            return {
+                "rt_cd": "99",
+                "msg1": f"TR_ID not found for API: {api_name}",
+                "error": "TR_ID_NOT_CONFIGURED",
+                "_debug_info": f"TR_ID for API '{api_name}' is not configured in api_config.yaml",
+            }
 
-        # TR_ID 모의투자용으로 변경
+        # TR_ID 모의투자용으로 변경 (나중에 모의투자 사용 시 필요)
         if (
             self.is_paper_trading
             and effective_tr_id
@@ -718,18 +603,20 @@ class APIClient:
         while current_retry <= retry_count:
             try:
                 logger.info(f"Requesting {method} {url} (TR: {effective_tr_id})")
-                logger.debug(f"Headers: {json.dumps(req_headers, indent=2)}")
-                if params:
-                    logger.debug(f"Params: {json.dumps(params, indent=2)}")
-                if body:
-                    logger.debug(f"Body: {json.dumps(body, indent=2)}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Headers: {json.dumps(req_headers, indent=2)}")
+                    if params:
+                        logger.debug(f"Params: {json.dumps(params, indent=2)}")
+                    if body:
+                        logger.debug(f"Body: {json.dumps(body, indent=2)}")
 
-                # API 키와 시크릿 키가 헤더에 제대로 들어갔는지 확인 (민감 정보 일부 마스킹)
+                        # API 키와 시크릿 키가 헤더에 제대로 들어갔는지 확인 (민감 정보 일부 마스킹)
                 if "appkey" in req_headers:
                     key_value = req_headers["appkey"]
-                    logger.info(
-                        f"Using API Key: {key_value[:4]}...{key_value[-4:] if len(key_value) > 8 else ''}"
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            f"Using API Key: {key_value[:4]}...{key_value[-4:] if len(key_value) > 8 else ''}"
+                        )
                 else:
                     logger.error("API Key is missing from request headers!")
 
@@ -745,10 +632,11 @@ class APIClient:
                     logger.error(f"Unsupported HTTP method: {method}")
                     return {"rt_cd": "99", "msg1": f"Unsupported HTTP method: {method}"}
 
-                logger.debug(f"Response Status: {response.status_code}")
-                logger.debug(
-                    f"Response Headers: {json.dumps(dict(response.headers), indent=2)}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Response Status: {response.status_code}")
+                    logger.debug(
+                        f"Response Headers: {json.dumps(dict(response.headers), indent=2)}"
+                    )
                 try:
                     response_data = response.json()
                     # 더 자세한 응답 디버깅
@@ -756,7 +644,7 @@ class APIClient:
                         f"API Response Code: {response_data.get('rt_cd', 'N/A')}, Message: {response_data.get('msg1', 'N/A')}"
                     )
 
-                    # 응답에 데이터가 있는지 확인하고 로그
+                    # 응답에 데이터가 있는지 확인하고 로그 (정보성 로그로 변경)
                     has_output1 = (
                         "output1" in response_data and response_data["output1"]
                     )
@@ -766,15 +654,22 @@ class APIClient:
                     has_output = "output" in response_data and response_data["output"]
 
                     if not (has_output1 or has_output2 or has_output):
-                        # 데이터가 없는 경우는 정상적인 상황일 수 있으므로 debug 레벨로 변경
-                        logger.debug(
-                            f"API Response has no data in output fields for {api_name}!"
-                        )
+                        # API가 성공했지만 데이터가 없는 경우 (주말, 공휴일 등 정상 상황)
+                        if response_data.get("rt_cd") == "0":
+                            logger.debug(
+                                f"API {api_name} returned success but no data (likely no trading on this date range)"
+                            )
+                        else:
+                            # API 에러인 경우에만 경고
+                            logger.warning(
+                                f"API Response has no data in output fields for {api_name}! (rt_cd: {response_data.get('rt_cd')}, msg: {response_data.get('msg1')})"
+                            )
 
-                    # 디버깅을 위해 전체 응답 로깅
-                    logger.debug(
-                        f"Response Body: {json.dumps(response_data, indent=2, ensure_ascii=False)}"
-                    )
+                    # 디버깅을 위해 전체 응답 로깅 (매우 상세한 로그는 필요시에만)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            f"Response Body: {json.dumps(response_data, indent=2, ensure_ascii=False)}"
+                        )
                 except json.JSONDecodeError:
                     logger.error(f"Failed to decode JSON response: {response.text}")
                     return {
